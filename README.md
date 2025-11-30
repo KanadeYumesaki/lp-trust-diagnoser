@@ -174,5 +174,3 @@ python diagnose_lp.py samples/sample_lp_a.html --pretty
 * このリポジトリは PoC 用です。本番運用前提ではありません。
 * 商用LPのHTMLを保存・分析する場合は、各自の責任で法的・倫理的な問題がないように運用してください。
 * Gemini API の利用規約・料金体系は、公式ドキュメントを確認してください。
-
-````
