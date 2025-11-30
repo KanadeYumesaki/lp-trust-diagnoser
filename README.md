@@ -8,7 +8,7 @@
 
 > ⚠️ 注意  
 > 実LPのHTMLやテスト用データ（商用サイトのコピー）は、このリポジトリには含めません。  
-> 手元でテストする場合は、`samples/` 以下に **自分の責任で取得したHTML** を置いてください（`samples/` は `.gitignore` 済み）。
+> 手元でテストする場合は、`samples/` 以下に **自分の責任で取得したHTML** を置いてください
 
 ---
 
@@ -72,16 +72,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-`requirements.txt` の一例（すでにある場合はそちらを優先してください）：
-
-```text
-beautifulsoup4
-lxml
-google-genai
-python-dotenv
-loguru
-```
-
 ---
 
 ## 3. APIキーの設定
@@ -94,16 +84,6 @@ loguru
 GEMINI_API_KEY=ここにあなたのAPIキー
 # または
 # GOOGLE_API_KEY=ここにあなたのAPIキー
-```
-
-`.env` 自体は `.gitignore` 済みで、リポジトリには含めません。
-共有用には `.env.example` をコミットしておきます（値は空にする）。
-
-例：`.env.example`
-
-```dotenv
-GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
-# or GOOGLE_API_KEY=
 ```
 
 ---
