@@ -1,0 +1,213 @@
+# LP信頼診断エージェント v0 PoC 説明書
+
+## 0. 概要
+
+### 0-1. コンセプト
+
+- 対象：LP（ランディングページ）
+- ゴール：
+  - **短期CVRだけを盛るLPではなく**  
+    「**信頼・ブランド価値を守りながら売れるLPか？**」を診断するAIエージェント。:contentReference[oaicite:11]{index=11}
+- 判断の優先順位：
+  1. 法令・倫理
+  2. ユーザーの信頼
+  3. 長期的なブランド価値
+  4. 短期CVR:contentReference[oaicite:12]{index=12}  
+
+### 0-2. PoC v0 の狙い
+
+- 1LPあたり **Standard LLM 1コール** で、6軸診断＋summaryを返す。:contentReference[oaicite:13]{index=13}  
+- 自己学習やHeavyモデルは「構想レベル」に留め、  
+  まずは **ローカルスクリプト + JSON診断 + 手動評価** を成立させる。
+
+---
+
+## 1. システム構成（PoC版）
+
+### 1-1. フォルダ構成
+
+```text
+lp-trust-diagnoser/
+├─ lp_trust_diagnoser/
+│   ├─ __init__.py
+│   ├─ exceptions.py          # 共通例外クラス
+│   ├─ logging_config.py      # ログ設定
+│   ├─ config.py              # LLM設定（モデル名・温度など）
+│   ├─ ingestion/
+│   │   ├─ __init__.py
+│   │   └─ html_parser.py     # HTML → hero/pricing/cancel/reviews/raw 抽出
+│   ├─ llm/
+│   │   ├─ __init__.py
+│   │   ├─ prompts.py         # Scan & Coach Systemプロンプト v0
+│   │   └─ gemini_client.py   # Gemini API ラッパー
+│   └─ models/
+│       ├─ __init__.py
+│       └─ diagnosis.py       # AxisスコアなどのDomainモデル
+├─ tests/
+│   └─ sample_lps/            # 手動テスト用のLP HTML
+├─ .env                       # GEMINI_API_KEYなど（gitignore推奨）
+└─ diagnose_lp.py             # CLIエントリポイント
+````
+
+### 1-2. レイヤー構造（簡略）
+
+* **Ingestion Layer**
+
+  * HTML → テキスト抽出 → `hero / pricing / cancel / reviews / raw` に分解。
+* **Scan & Coach Layer（LLM）**
+
+  * 3レイヤー×6軸の評価ルールを埋め込んだ System プロンプトで Gemini を1コール。
+* **Orchestrator（PoCでは diagnose_lp.py が兼任）**
+
+  * HTML読み込み → Ingestion → Gemini呼び出し → JSON出力
+
+---
+
+## 2. 信頼モデル（3レイヤー×6軸）概要
+
+### 2-1. レイヤー
+
+1. **LayerA：情報の誠実さ（information_honesty）**
+2. **LayerB：社会的・感情的な信頼（social_emotional_trust）**
+3. **LayerC：行動と主導権（action_control）**
+
+### 2-2. 6軸（PoCでの評価単位）
+
+* Axis1：信頼・透明性（trust_transparency / LayerA）
+* Axis2：期待値と現実の整合性（expectation_alignment / LayerA）
+* Axis3：価格・プロモーションの誠実さ（price_promotion_integrity / LayerA）
+* Axis4：社会的証明のリアルさ（social_proof_authenticity / LayerB）
+* Axis5：ユーザー尊重度・心理への配慮（user_respect_psychological_safety / LayerB）
+* Axis6：行動のしやすさと主導権のバランス（ease_control_balance / LayerC）
+
+スコアは全軸共通で 1〜5（1:改善必須〜5:最適）。
+
+---
+
+## 3. セットアップ手順
+
+### 3-1. 事前準備
+
+1. Python 3.12 をインストール（Windowsの `py` ランチャーで利用可能な状態）
+
+2. リポジトリを取得：
+
+   ```bash
+   git clone <this-repo-url> lp-trust-diagnoser
+   cd lp-trust-diagnoser
+   ```
+
+3. 仮想環境を作成・有効化：
+
+   ```bash
+   py -3.12 -m venv .venv
+   .\.venv\Scripts\Activate.ps1  # PowerShell の例
+   ```
+
+### 3-2. ライブラリのインストール
+
+```bash
+pip install google-genai beautifulsoup4 python-dotenv
+```
+
+### 3-3. `.env` の設定
+
+プロジェクトルートに `.env` を作成：
+
+```env
+GEMINI_API_KEY=あなたのAPIキー
+# または GOOGLE_API_KEY=...
+```
+
+`diagnose_lp.py` 実行時に `python-dotenv` で読み込まれ、
+`GeminiClient` が環境変数として参照する。
+
+---
+
+## 4. 使い方（CLI）
+
+### 4-1. 基本コマンド
+
+```bash
+python diagnose_lp.py path/to/lp.html --pretty
+```
+
+* 入力：ローカルに保存したLP HTMLファイル
+* 出力：標準出力に6軸診断結果のJSON
+
+### 4-2. 出力フォーマット
+
+```json
+{
+  "axes": {
+    "trust_transparency": {
+      "score": 3,
+      "reason": "会社情報・問い合わせ先はフッターに明記されているが、データの扱いに関する説明は簡潔にとどまっている。",
+      "improvement_hint": "プライバシーポリシーやセキュリティ方針への導線をファーストビュー周辺にも追加し、問い合わせ時の平均返信時間の目安を示すと、より安心感が高まりそうです。"
+    },
+    "...": {}
+  },
+  "summary_comment": "6軸全体としては、透明性と社会的証明は一定レベルだが、価格条件と解約周りの説明に改善余地がある。特にAxis3とAxis6を整えることで、申し込み後のギャップを減らし、長期的な信頼につながるLPに近づくと考えられる。"
+}
+```
+
+※ 実際の文面はLPごとに変化する。
+
+---
+
+## 5. Scan & Coach プロンプトの設計方針（概要）
+
+* 役割：
+
+  * 「視線スキャナ」前提：LP全文ではなく、セクション要約を前提とした評価。
+  * 「コーチング」前提：断罪ではなく、良い点＋改善方向をセットで返すスタイル。
+* LLMには以下を厳格に要求：
+
+  * 出力は **JSONのみ**（説明文やマークダウンを含めない）
+  * 各軸の `score` / `reason` / `improvement_hint` を必ず出す
+  * 情報が不足している場合は「推測で高得点にしない」こと
+
+---
+
+## 6. 制約・既知の限界（PoC版）
+
+1. Ingestionは「ざっくり抽出」
+
+   * hero/pricing/cancel/reviews はキーワードベースで分割
+   * 複雑なレイアウト（JSレンダリング前提など）には対応していない
+
+2. 1LP = 1コール前提
+
+   * コスト・レイテンシを抑えるため、
+     Heavyモデルや複数回の再診断はPoCでは行わない
+
+3. 精度検証はミニマム
+
+   * 人間評価との比較は **スプレッドシート＋簡易集計** を想定し、
+     本格的な統計評価までは踏み込まない（フェーズ4で拡張予定）
+
+---
+
+## 7. 今後の発展（フェーズ2〜4との接続）
+
+* フェーズ2：
+
+  * `diagnose_lp.py` 内のロジックを FastAPI の `/diagnose` ハンドラに移植
+  * SQLite に `diagnosis_logs` を記録し、
+    「どのLPにどのスコアが出たか」を後から分析できるようにする
+
+* フェーズ3：
+
+  * サンプルLP 5〜10本を用い、人間ラベルとの diff を集計
+  * ズレが大きい軸・業種パターンを洗い出し、
+    プロンプト／Ingestion改善の優先順位を決める
+
+* フェーズ4（構想）：
+
+  * Self-Learning Orchestrator でログを集約し、
+
+    * 重み設定の改善案
+    * ルーブリック・プロンプトの改善案
+    * 監査対象LPの抽出ロジック
+      を自動ドラフトする
+

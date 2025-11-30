@@ -1,0 +1,206 @@
+# LP信頼診断エージェント v0 テスト仕様書（PoC版）
+
+## 0. ドキュメントの位置づけ
+
+本書は「LP信頼診断エージェントシステム v0」の **PoCフェーズ（フェーズ1〜3）** を対象としたテスト仕様書である。  
+信頼モデル（3レイヤー×6軸）と PoC アーキテクチャに基づき、  
+「最低限どこまで動いていれば、PoCとして説得力を持てるか」を定義する。:contentReference[oaicite:0]{index=0} :contentReference[oaicite:1]{index=1}
+
+---
+
+## 1. テスト対象と範囲
+
+### 1-1. テスト対象コンポーネント
+
+- `diagnose_lp.py`（CLIエントリポイント）
+- `lp_trust_diagnoser.ingestion.html_parser.html_to_text_sections`
+- `lp_trust_diagnoser.llm.gemini_client.GeminiClient`
+- `lp_trust_diagnoser.models.diagnosis.LPDiagnosisResult`
+
+### 1-2. スコープ（フェーズ別）
+
+- **フェーズ1：ローカルスクリプト版**
+  - 入力：LP HTML ファイル
+  - 出力：6軸スコア＋reason＋improvement_hint＋summary_comment（JSON）:contentReference[oaicite:2]{index=2}
+  - 対象テスト：
+    - Ingestionロジックの最低限の妥当性
+    - Gemini 呼び出しの異常系ハンドリング
+    - JSON構造の一貫性
+
+- **フェーズ2：簡易API版**（将来拡張を見据えた項目）
+  - `/diagnose` エンドポイント
+  - `diagnosis_logs` テーブルへのINSERT:contentReference[oaicite:3]{index=3}
+
+- **フェーズ3：人間評価との簡易比較**
+  - サンプルLP 3本に対する **AIスコア vs 人間スコア** の差分集計:contentReference[oaicite:4]{index=4}  
+
+---
+
+## 2. テスト環境
+
+### 2-1. ソフトウェア構成
+
+- OS：Windows 11 を想定（他OSでも同等動作が望ましい）
+- Python：3.12（`py -3.12 -m venv .venv` で作成した仮想環境）
+- パッケージ：
+  - `google-genai`
+  - `beautifulsoup4`
+  - `python-dotenv`
+- LLM：
+  - Gemini（AI Studio / `gemini-2.5-flash` などの Standard モデル）
+  - APIキーは `.env` で管理（`GEMINI_API_KEY` / `GOOGLE_API_KEY`）
+
+### 2-2. テストデータ
+
+- サンプルLP（HTML保存ファイル）
+  - BtoB SaaS：1本
+  - サブスク / サービス：1本
+  - D2C / 健康食品・美容系：1本
+---
+
+## 3. テスト項目（フェーズ1）
+
+### 3-0. テストコマンド
+python diagnose_lp.py samples/サブスク.html --pretty
+python diagnose_lp.py samples/SaaS.html --pretty
+python diagnose_lp.py samples/D2C.html --pretty
+
+### 3-1. Ingestionレイヤー（html_to_text_sections）
+
+**目的**：  
+HTML→テキスト抽出および `hero / pricing / cancel / reviews / raw` の分割が、  
+「人間の流し読み感覚として破綻していないか」を確認する。:contentReference[oaicite:5]{index=5}
+
+**観点**
+
+1. **最低限の抽出**
+   - [TI-01] HTMLが空でない場合、`raw` が空文字列にならないこと
+   - [TI-02] `hero` の長さが 0 ではないこと（先頭数百文字が入っている）
+
+2. **価格・キャンペーン検出**
+   - [TI-03] `pricing` に「価格 / 円 / 月額 / 無料 / キャンペーン」等の行が含まれるか
+   - [TI-04] 価格情報が存在するLPで `pricing` が完全に空にならないこと（目視確認）
+
+3. **解約・キャンセル検出**
+   - [TI-05] 解約・返金に関する文言がある場合、`cancel` に1行以上含まれること
+   - [TI-06] 解約情報が全く存在しないLPでは `cancel` が空／ごく短くなること
+
+4. **レビュー・事例検出**
+   - [TI-07] 「お客様の声」「導入事例」「口コミ」などがある場合、`reviews` に含まれること
+
+**実施方法**
+
+- コマンド：
+  - `python diagnose_lp.py tests/sample_lps/b2b_tetori.html --debug-sections > /dev/null`
+- `stderr` に出力される sections JSON を確認し、上記観点を目視でチェック。
+
+---
+
+### 3-2. LLM呼び出し・JSON構造
+
+**目的**：  
+Scan & Coach プロンプトに従い、**6軸×3項目＋summary_comment** の JSON が安定して返ることを確認する。:contentReference[oaicite:6]{index=6}
+
+**観点**
+
+1. **形式**
+   - [TL-01] `axes` キーが存在する
+   - [TL-02] 以下6軸が全て存在する：
+     - `trust_transparency`
+     - `expectation_alignment`
+     - `price_promotion_integrity`
+     - `social_proof_authenticity`
+     - `user_respect_psychological_safety`
+     - `ease_control_balance`:contentReference[oaicite:7]{index=7}
+   - [TL-03] 各軸に `score` / `reason` / `improvement_hint` が存在する
+   - [TL-04] `score` が 1〜5 の整数である
+   - [TL-05] `summary_comment` が文字列として存在する
+
+2. **内容（ざっくり妥当性）**
+   - [TL-06] `reason` が日本語の文章として破綻していない
+   - [TL-07] `improvement_hint` が「何をどう直せばよいか」が読み取れるレベルになっている
+   - [TL-08] `summary_comment` が「良い点＋改善ポイント」を両方含んでいる（ポジネガのバランス）
+
+**実施方法**
+
+- コマンド例：
+  - `python diagnose_lp.py tests/sample_lps/d2c_metabarrier.html --pretty`
+- 出力JSONをそのまま目視チェック。  
+  → 将来は自動テストで JSON Schema チェックも導入可能。
+
+---
+
+### 3-3. エラー・例外処理
+
+**目的**：  
+企業利用を想定し、最低限「原因が分かるメッセージ」が返ることを確認する。
+
+**観点・テストケース**
+
+- [TE-01] `.env` に APIキーがない場合
+  - 期待結果：  
+    - 終了コード ≠ 0  
+    - `ERROR: Gemini API key is not set ...` のようなメッセージ
+
+- [TE-02] ネットワーク断（あえてAirplaneモード等で再現）
+  - 期待結果：
+    - `LLMClientError` 相当のエラーが表示される
+    - 「再実行すれば直る可能性がある」ことが読み取れるメッセージ
+
+- [TE-03] 壊れたHTMLファイル（テキストファイルだが `<html>` を含まない等）
+  - 期待結果：
+    - `IngestionError` 相当のエラーが表示される
+    - 「HTML解析に失敗した」旨が分かる
+
+---
+
+## 4. テスト項目（フェーズ3：人間評価との比較）
+
+### 4-1. サンプルとラベリング
+
+- 対象LP：3本（業種はできるだけ分散）
+- 人間ラベル：
+  - 各LPに対して 6軸それぞれ 1〜5点
+  - 軽いコメント（1〜2文）をスプレッドシートに記録:contentReference[oaicite:8]{index=8}  
+
+### 4-2. AI診断との比較
+
+**計算指標**
+
+- 軸ごとに：
+  - 平均 diff：`human_score - ai_score`
+  - 平均 |diff|：絶対値の平均
+  - ±1点以内の一致率（%）
+
+**評価観点**
+
+- [TV-01] どの軸が一貫して **甘い** / **厳しい** 傾向にあるか
+- [TV-02] 特にズレが大きいLPの特徴（業種・表現タイプなど）
+- [TV-03] ズレの原因が
+  - Ingestionの問題か
+  - プロンプト（ルーブリック）の問題か
+  - モデル側の限界／バイアスか
+  のどれに近そうかを仮説ベースで整理する:contentReference[oaicite:9]{index=9}  
+
+---
+
+## 5. テスト完了の判断基準（PoC版）
+
+PoC 完了の目安として、以下を満たせば「v0 PoC としてはOK」とする。
+
+1. 技術的健全性
+   - `diagnose_lp.py` が全サンプルLPに対してエラーなく実行できる
+   - JSON構造の欠落が発生しない（6軸すべて返る）
+
+2. 実務的な説得力
+   - 人間ラベルとの比較で、  
+     - 平均 |diff| が 1点以内の軸が **2〜3軸以上** ある
+     - 逆にズレが大きい軸・パターンが定性的に把握できている
+
+3. アーキテクトとしての説明可能性
+   - ズレの原因仮説を、
+     - Ingestion
+     - プロンプト設計
+     - モデル選定・コスト制約
+     - 今後の自己学習ループ  
+     の観点で説明できる状態。:contentReference[oaicite:10]{index=10}  
